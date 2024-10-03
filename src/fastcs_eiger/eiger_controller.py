@@ -324,6 +324,7 @@ class Subsystem:
         self.parameter_update_lock = lock
         self.parameter_updates: set[str] = set()
         self.stale = False
+        self.attribute_mapping: dict[str, AttrR] = {}
 
     async def introspect_detector_subsystem(
         self, connection: HTTPConnection
@@ -369,7 +370,6 @@ class Subsystem:
 
 
 class EigerSubsystemController(SubController):
-
     stale_parameters = AttrR(Bool())
     _subcontroller_mapping: dict[str, "EigerSubController"]
 
@@ -403,7 +403,7 @@ class EigerSubsystemController(SubController):
         for parameter in parameters:
             if parameter in IGNORED_KEYS:
                 continue
-            match self.get_attribute(parameter):
+            match self._get_attribute(parameter):
                 # TODO: mypy doesn't understand AttrR as a type for some reason:
                 # `error: Expected type in class pattern; found "Any"  [misc]`
                 case AttrR(updater=EigerConfigHandler() as updater) as attr:  # type: ignore [misc]
@@ -423,24 +423,25 @@ class EigerSubsystemController(SubController):
 
         """
 
-    def get_attribute(self, key: str):
+    def _get_attribute(self, key: str) -> AttrR | None:
+        # attributes with non-standard names or belong to sub controllers get added to
+        # the attribute map for the subsystem
+        if key in self.subsystem.attribute_mapping:
+            return self.subsystem.attribute_mapping[key]
+
+        # if not in mapping, get from this controller
         attr_name = _key_to_attribute_name(key)
-        if attr := getattr(self, attr_name, None):
-            # attribute belongs to controller
-            return attr
-        elif key in self._subcontroller_mapping:
-            controller = self._subcontroller_mapping[key]
-            return controller.get_attribute(key)
+        return getattr(self, attr_name, None)
 
 
 class EigerDetectorController(EigerSubsystemController):
     async def _create_subcontrollers(self, parameters: list[EigerParameter]):
-
         def __threshold_parameter(parameter: EigerParameter):
             return "threshold" in parameter.key
 
         threshold_parameters, parameters[:] = partition(
-            parameters, __threshold_parameter)
+            parameters, __threshold_parameter
+        )
 
         threshold_controller = EigerThresholdController(
             threshold_parameters, self.connection, self.subsystem
@@ -462,7 +463,6 @@ class EigerSubController(SubController):  # for smaller parts of subsystems
         self._parameters = parameters
         self.subsystem = subsystem
         self.connection = connection
-        self._attribute_mapping: dict[str, AttrR] = {}
         super().__init__()
 
     async def initialise(self):
@@ -470,17 +470,9 @@ class EigerSubController(SubController):  # for smaller parts of subsystems
         for name, attribute in attributes.items():
             setattr(self, name, attribute)
 
-    def get_attribute(self, key: str):
-        if key in self._attribute_mapping:
-            return self._attribute_mapping[key]
-        else:
-            attr_name = _key_to_attribute_name(key)
-            return getattr(self, attr_name, None)
-
 
 class EigerThresholdController(EigerSubController):
     async def initialise(self):
-
         def __is_index(parameter: EigerParameter):
             parts = parameter.key.split("/")
             return len(parts) == 3 and parts[1].isnumeric()
@@ -493,15 +485,15 @@ class EigerThresholdController(EigerSubController):
         index_attributes = _create_attributes(
             index_parameters, group_namer=__idx_group_name
         )
-        for name, attribute in index_attributes.items():
-            _, index, field = name.split("/")
+        for key, attribute in index_attributes.items():
+            _, index, field = key.split("/")
             attr_name = f"{field}_{index}"
             setattr(self, attr_name, attribute)
-            self._attribute_mapping[name] = attribute
+            self.subsystem.attribute_mapping[key] = attribute
 
         other_attributes = _create_attributes(other_parameters)
-        for name, attribute in other_attributes.items():
-            attr_name = _key_to_attribute_name(name)
+        for key, attribute in other_attributes.items():
+            attr_name = _key_to_attribute_name(key)
             attr_name = attr_name.removeprefix("threshold_")
             setattr(self, attr_name, attribute)
-            self._attribute_mapping[name] = attribute
+            self.subsystem.attribute_mapping[key] = attribute
