@@ -381,7 +381,7 @@ class EigerSubsystemController(SubController):
 
     async def initialise(self) -> None:
         parameters = await self.subsystem.introspect_detector_subsystem(self.connection)
-        parameters = await self._create_subcontrollers(parameters)
+        await self._create_subcontrollers(parameters)
         attributes = _create_attributes(parameters, _key_to_attribute_name)
 
         for name, attribute in attributes.items():
@@ -418,14 +418,10 @@ class EigerSubsystemController(SubController):
 
         Args:
             parameters: list of ``EigerParameter``s to be filtered and passed into
-            ``EigerSubController``s
-
-        Returns:
-            a list of ``EigerParameter``s which is the same as that passed in as
-            argument with the parameters moved to an ``EigerSubController`` removed
+            ``EigerSubController``s. ``EigerParameter``s wich are filtered should be
+            removed from the list.
 
         """
-        return parameters
 
     def get_attribute(self, key: str):
         attr_name = _key_to_attribute_name(key)
@@ -443,7 +439,8 @@ class EigerDetectorController(EigerSubsystemController):
         def __threshold_parameter(parameter: EigerParameter):
             return "threshold" in parameter.key
 
-        threshold_parameters, parameters = partition(parameters, __threshold_parameter)
+        threshold_parameters, parameters[:] = partition(
+            parameters, __threshold_parameter)
 
         threshold_controller = EigerThresholdController(
             threshold_parameters, self.connection, self.subsystem
@@ -454,10 +451,8 @@ class EigerDetectorController(EigerSubsystemController):
         for parameter in threshold_parameters:
             self._subcontroller_mapping[parameter.key] = threshold_controller
 
-        return parameters
 
-
-class EigerSubController(SubController):  # for smaller parts of submodules
+class EigerSubController(SubController):  # for smaller parts of subsystems
     def __init__(
         self,
         parameters: list[EigerParameter],
