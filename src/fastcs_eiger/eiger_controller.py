@@ -1,8 +1,8 @@
 import asyncio
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import numpy as np
 from fastcs.attributes import Attribute, AttrR, AttrRW, AttrW
@@ -326,9 +326,7 @@ class Subsystem:
         self.stale = False
         self.attribute_mapping: dict[str, AttrR] = {}
 
-    async def introspect_detector_subsystem(
-        self, connection: HTTPConnection
-    ) -> list[EigerParameter]:
+    async def introspect(self, connection: HTTPConnection) -> list[EigerParameter]:
         parameters = []
         for mode in EIGER_PARAMETER_MODES:
             subsystem_keys = [
@@ -352,7 +350,6 @@ class Subsystem:
                     for key, response in zip(subsystem_keys, responses, strict=False)
                 ]
             )
-
         return parameters
 
     async def queue_update(self, parameters: list[str]):
@@ -380,7 +377,7 @@ class EigerSubsystemController(SubController):
         super().__init__()
 
     async def initialise(self) -> None:
-        parameters = await self.subsystem.introspect_detector_subsystem(self.connection)
+        parameters = await self.subsystem.introspect(self.connection)
         await self._create_subcontrollers(parameters)
         attributes = _create_attributes(parameters, _key_to_attribute_name)
 
