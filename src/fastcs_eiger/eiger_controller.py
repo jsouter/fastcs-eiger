@@ -67,7 +67,7 @@ class EigerHandler:
 
     async def put(
         self,
-        controller: "EigerSubsystemController | EigerSubController",
+        controller: "EigerSubController",
         _: AttrW,
         value: Any,
     ) -> None:
@@ -362,15 +362,28 @@ class Subsystem:
             self.stale = True
 
 
-class EigerSubsystemController(SubController):
+class EigerSubController(SubController):  # for smaller parts of subsystems
+    def __init__(
+        self,
+        connection: HTTPConnection,
+    ):
+        self.connection = connection
+        super().__init__()
+
+    async def initialise(self) -> None:
+        raise NotImplementedError(
+            "Initialise method not implemented for EigerSubController base class"
+        )
+
+
+class EigerSubsystemController(EigerSubController):
     stale_parameters = AttrR(Bool())
     _subcontroller_mapping: dict[str, "EigerSubController"]
 
     def __init__(self, subsystem: Subsystem, connection: HTTPConnection):
         self.subsystem = subsystem
-        self.connection = connection
         self._subcontroller_mapping = {}
-        super().__init__()
+        super().__init__(connection)
 
     async def initialise(self) -> None:
         parameters = await self.subsystem.introspect(self.connection)
@@ -411,14 +424,14 @@ class EigerSubsystemController(SubController):
 
         Args:
             parameters: list of ``EigerParameter``s to be filtered and passed into
-            ``EigerSubController``s. ``EigerParameter``s wich are filtered should be
+            ``EigerSubController``s. ``EigerParameter``s which are filtered should be
             removed from the list.
 
         """
 
     def _get_attribute(self, key: str) -> AttrR | None:
-        # attributes with non-standard names or belong to sub controllers get added to
-        # the attribute map for the subsystem
+        # attributes with non-standard names or belonging to sub controllers get
+        # added to the attribute map for the subsystem
         if key in self.subsystem.attribute_mapping:
             return self.subsystem.attribute_mapping[key]
 
@@ -437,7 +450,7 @@ class EigerDetectorController(EigerSubsystemController):
         )
 
         threshold_controller = EigerThresholdController(
-            threshold_parameters, self.connection, self.subsystem
+            threshold_parameters, self.subsystem, self.connection
         )
         self.register_sub_controller("THRESHOLD", threshold_controller)
         await threshold_controller.initialise()
@@ -446,25 +459,17 @@ class EigerDetectorController(EigerSubsystemController):
             self._subcontroller_mapping[parameter.key] = threshold_controller
 
 
-class EigerSubController(SubController):  # for smaller parts of subsystems
+class EigerThresholdController(EigerSubController):
     def __init__(
         self,
         parameters: list[EigerParameter],
-        connection: HTTPConnection,
         subsystem: Subsystem,
+        connection: HTTPConnection,
     ):
         self._parameters = parameters
         self.subsystem = subsystem
-        self.connection = connection
-        super().__init__()
+        super().__init__(connection)
 
-    async def initialise(self):
-        attributes = _create_attributes(self._parameters, _key_to_attribute_name)
-        for name, attribute in attributes.items():
-            setattr(self, name, attribute)
-
-
-class EigerThresholdController(EigerSubController):
     async def initialise(self):
         def __is_index(parameter: EigerParameter):
             parts = parameter.key.split("/")
