@@ -182,7 +182,6 @@ class EigerController(Controller):
         self._ip = ip
         self._port = port
         self.connection = HTTPConnection(self._ip, self._port)
-        self.subsystems: dict[str, Subsystem] = {}
         # Parameter update logic
         self.parameter_update_lock = asyncio.Lock()
 
@@ -203,13 +202,10 @@ class EigerController(Controller):
         try:
             for subsystem_name in EIGER_PARAMETER_SUBSYSTEMS:
                 subsystem = Subsystem(subsystem_name, self.parameter_update_lock)
-                self.subsystems[subsystem_name] = subsystem
-                subsystem_controller_cls = (
-                    EigerDetectorController
-                    if subsystem_name == "detector"
-                    else EigerSubsystemController
-                )
-                controller = subsystem_controller_cls(subsystem, self.connection)
+                if subsystem_name == "detector":
+                    controller = EigerDetectorController(subsystem, self.connection)
+                else:
+                    controller = EigerSubsystemController(subsystem, self.connection)
                 self.register_sub_controller(subsystem_name.upper(), controller)
                 await controller.initialise()
         except HTTPRequestError:
